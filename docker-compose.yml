@@ -1,0 +1,128 @@
+# docker-compose.yml — CS332 | Distributed SGD Project | Phase 1
+# (version tag removed — not needed in modern Docker Compose)
+
+x-worker-common: &worker-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  shm_size: '2gb'
+  volumes:
+    - ./src:/app/src
+    - ./results:/results
+    - cifar10_data:/data/cifar10
+  environment:
+    - MASTER_ADDR=worker_0
+    - MASTER_PORT=29500
+    - WORLD_SIZE=${WORLD_SIZE:-4}
+    - BACKEND=${BACKEND:-ring_ar}
+    - DIST_BACKEND=${DIST_BACKEND:-gloo}
+    - EPOCHS=${EPOCHS:-5}
+    - BATCH_SIZE=${BATCH_SIZE:-64}
+    - LR=${LR:-0.01}
+    - TAU=${TAU:-0}
+    - RUN_ID=${RUN_ID:-baseline}
+    - ORCHESTRATOR_HOST=orchestrator
+  networks:
+    - cluster_net
+  depends_on:
+    - orchestrator
+  restart: on-failure
+
+services:
+
+  # ---------- Orchestrator ----------
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python /app/src/orchestrator.py --world-size ${WORLD_SIZE:-4} --port 29600
+    volumes:
+      - ./src:/app/src
+      - ./results:/results
+    networks:
+      - cluster_net
+    ports:
+      - "29600:29600/udp"
+    restart: unless-stopped
+
+  # ---------- Worker 0 (rendezvous / rank 0) ----------
+  worker_0:
+    <<: *worker-common
+    hostname: worker_0
+    environment:
+      - MASTER_ADDR=worker_0
+      - MASTER_PORT=29500
+      - WORLD_SIZE=${WORLD_SIZE:-4}
+      - RANK=0
+      - BACKEND=${BACKEND:-ring_ar}
+      - DIST_BACKEND=${DIST_BACKEND:-gloo}
+      - EPOCHS=${EPOCHS:-5}
+      - BATCH_SIZE=${BATCH_SIZE:-64}
+      - LR=${LR:-0.01}
+      - TAU=${TAU:-0}
+      - RUN_ID=${RUN_ID:-baseline}
+      - ORCHESTRATOR_HOST=orchestrator
+    ports:
+      - "29500:29500"
+      - "29501:29501"
+
+  # ---------- Worker 1 ----------
+  worker_1:
+    <<: *worker-common
+    hostname: worker_1
+    environment:
+      - MASTER_ADDR=worker_0
+      - MASTER_PORT=29500
+      - WORLD_SIZE=${WORLD_SIZE:-4}
+      - RANK=1
+      - BACKEND=${BACKEND:-ring_ar}
+      - DIST_BACKEND=${DIST_BACKEND:-gloo}
+      - EPOCHS=${EPOCHS:-5}
+      - BATCH_SIZE=${BATCH_SIZE:-64}
+      - LR=${LR:-0.01}
+      - TAU=${TAU:-0}
+      - RUN_ID=${RUN_ID:-baseline}
+      - ORCHESTRATOR_HOST=orchestrator
+
+  # ---------- Worker 2 ----------
+  worker_2:
+    <<: *worker-common
+    hostname: worker_2
+    environment:
+      - MASTER_ADDR=worker_0
+      - MASTER_PORT=29500
+      - WORLD_SIZE=${WORLD_SIZE:-4}
+      - RANK=2
+      - BACKEND=${BACKEND:-ring_ar}
+      - DIST_BACKEND=${DIST_BACKEND:-gloo}
+      - EPOCHS=${EPOCHS:-5}
+      - BATCH_SIZE=${BATCH_SIZE:-64}
+      - LR=${LR:-0.01}
+      - TAU=${TAU:-0}
+      - RUN_ID=${RUN_ID:-baseline}
+      - ORCHESTRATOR_HOST=orchestrator
+
+  # ---------- Worker 3 ----------
+  worker_3:
+    <<: *worker-common
+    hostname: worker_3
+    environment:
+      - MASTER_ADDR=worker_0
+      - MASTER_PORT=29500
+      - WORLD_SIZE=${WORLD_SIZE:-4}
+      - RANK=3
+      - BACKEND=${BACKEND:-ring_ar}
+      - DIST_BACKEND=${DIST_BACKEND:-gloo}
+      - EPOCHS=${EPOCHS:-5}
+      - BATCH_SIZE=${BATCH_SIZE:-64}
+      - LR=${LR:-0.01}
+      - TAU=${TAU:-0}
+      - RUN_ID=${RUN_ID:-baseline}
+      - ORCHESTRATOR_HOST=orchestrator
+
+networks:
+  cluster_net:
+    driver: bridge
+
+volumes:
+  cifar10_data:
