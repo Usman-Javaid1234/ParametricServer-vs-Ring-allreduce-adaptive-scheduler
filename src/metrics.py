@@ -57,9 +57,19 @@ class MetricsCollector:
         base = results_dir or RESULTS_DIR
         base.mkdir(parents=True, exist_ok=True)
 
-        self._iter_path  = base / f"{run_id}_rank{rank}_iterations.csv"
-        self._epoch_path = base / f"{run_id}_rank{rank}_epochs.csv"
+        self._iter_path    = base / f"{run_id}_rank{rank}_iterations.csv"
+        self._epoch_path   = base / f"{run_id}_rank{rank}_epochs.csv"
         self._summary_path = base / f"{run_id}_rank{rank}_summary.json"
+
+        # Safety: never silently overwrite existing results.
+        if self._iter_path.exists() or self._epoch_path.exists():
+            import time as _time
+            suffix = int(_time.time())
+            log.warning(f"Results files already exist for run_id={run_id} "
+                        f"rank={rank} — appending suffix _{suffix} to avoid overwrite.")
+            self._iter_path    = base / f"{run_id}_rank{rank}_{suffix}_iterations.csv"
+            self._epoch_path   = base / f"{run_id}_rank{rank}_{suffix}_epochs.csv"
+            self._summary_path = base / f"{run_id}_rank{rank}_{suffix}_summary.json"
 
         self._iter_f  = open(self._iter_path,  "w", newline="")
         self._epoch_f = open(self._epoch_path, "w", newline="")

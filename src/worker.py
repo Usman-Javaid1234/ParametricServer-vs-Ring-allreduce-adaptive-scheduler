@@ -198,16 +198,16 @@ def evaluate(model, loader, criterion, device):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend",      type=str,   default="ring_ar",
+    parser.add_argument("--backend",      type=str,   default=os.environ.get("BACKEND",      "ring_ar"),
                         choices=["ps", "ring_ar"])
-    parser.add_argument("--model",        type=str,   default="resnet18")
-    parser.add_argument("--dataset",      type=str,   default="cifar10")
-    parser.add_argument("--epochs",       type=int,   default=5)
-    parser.add_argument("--batch-size",   type=int,   default=32)
-    parser.add_argument("--lr",           type=float, default=0.01)
-    parser.add_argument("--tau",          type=int,   default=0)
-    parser.add_argument("--dist-backend", type=str,   default="gloo")
-    parser.add_argument("--run-id",       type=str,   default="baseline")
+    parser.add_argument("--model",        type=str,   default=os.environ.get("MODEL",        "resnet18"))
+    parser.add_argument("--dataset",      type=str,   default=os.environ.get("DATASET",      "cifar10"))
+    parser.add_argument("--epochs",       type=int,   default=int(os.environ.get("EPOCHS",   "5")))
+    parser.add_argument("--batch-size",   type=int,   default=int(os.environ.get("BATCH_SIZE","128")))
+    parser.add_argument("--lr",           type=float, default=float(os.environ.get("LR",     "0.01")))
+    parser.add_argument("--tau",          type=int,   default=int(os.environ.get("TAU",      "0")))
+    parser.add_argument("--dist-backend", type=str,   default=os.environ.get("DIST_BACKEND", "gloo"))
+    parser.add_argument("--run-id",       type=str,   default=os.environ.get("RUN_ID",       "baseline"))
     args = parser.parse_args()
 
     rank        = int(os.environ.get("RANK", 0))
@@ -247,24 +247,20 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     log.info(f"Model params: {total_params/1e6:.2f}M")
 
-    # Data
+    # Data — all ranks load train, all ranks load val (GPU has enough RAM)
     train_ds = build_dataset(args.dataset, train=True,
                              rank=rank, world_size=world_size)
+    val_ds   = build_dataset(args.dataset, train=False,
+                             rank=rank, world_size=world_size)
 
-    # Only rank 0 needs val dataset - others skip it entirely to save RAM
-    val_ds = (build_dataset(args.dataset, train=False, rank=rank, world_size=world_size)
-              if rank == 0 else None)
-
-    sampler     = DistributedSampler(train_ds, num_replicas=world_size,
-                                     rank=rank, shuffle=True, seed=42)
-    use_gpu = device.type == "cuda"
+    sampler      = DistributedSampler(train_ds, num_replicas=world_size,
+                                      rank=rank, shuffle=True, seed=42)
+    use_gpu      = device.type == "cuda"
     train_loader = DataLoader(train_ds, batch_size=args.batch_size,
                               sampler=sampler, num_workers=0,
                               pin_memory=use_gpu)
-    # val loader only on rank 0, small batch size to avoid OOM
-    val_loader = (DataLoader(val_ds, batch_size=64, shuffle=False,
-                             num_workers=0, pin_memory=use_gpu)
-                  if rank == 0 else None)
+    val_loader   = DataLoader(val_ds, batch_size=128, shuffle=False,
+                              num_workers=0, pin_memory=use_gpu)
 
     # Optimizer
     optimizer = optim.SGD(model.parameters(), lr=args.lr,
@@ -281,40 +277,52 @@ def main():
     metrics = MetricsCollector(run_id=args.run_id, rank=rank,
                                arch=args.backend, world_size=world_size)
 
-    # Training loop — NO per-epoch validation to prevent rank 0 OOM.
-    # All ranks write train loss every epoch.
-    # Single validation pass runs AFTER all epochs complete.
-    final_train_loss = 0.0
+    # Training loop — per-epoch validation on rank 0.
+    # Barrier pair ensures rank 0 validates safely between epochs.
+    # ONE row written per epoch per rank — no duplicates.
     for epoch in range(1, args.epochs + 1):
         sampler.set_epoch(epoch)
         train_loss = train_epoch(model, train_loader, optimizer, criterion,
                                  sync_backend, metrics, device, epoch,
                                  rank, heartbeat)
         scheduler.step()
-        final_train_loss = train_loss
 
-        # ALL ranks write epoch row — guaranteed even if rank 0 dies later
-        metrics.record_epoch_train(epoch, train_loss)
-        log.info(f"Epoch {epoch}/{args.epochs} complete | train_loss={train_loss:.4f}")
+        # Barrier 1: all workers done training this epoch
+        dist.barrier()
 
-    # ---- Single validation pass after all training is done ----
-    # Runs only on rank 0. Training is fully finished so no OOM risk
-    # from competing with gradient buffers.
-    if rank == 0:
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
-        log.info("Running final validation...")
-        val_loss, val_acc = evaluate(model, val_loader, criterion, device)
-        log.info(f"Final Val | Loss: {val_loss:.4f} | Acc: {val_acc:.2f}%")
-        # Write final val metrics as a separate summary row (epoch=-1 flags it)
-        metrics.record_epoch(epoch=-1, train_loss=final_train_loss,
-                             val_loss=val_loss, val_acc=val_acc)
-        # Save checkpoint
-        os.makedirs("/results", exist_ok=True)
-        ckpt = f"/results/{args.run_id}_final.pt"
-        torch.save({"epochs": args.epochs, "model": model.state_dict(),
-                    "val_acc": val_acc}, ckpt)
-        log.info(f"Checkpoint saved: {ckpt}")
+        # Rank 0 evaluates; broadcasts val_loss and val_acc to all ranks
+        # so every rank writes ONE complete row with val metrics.
+        val_tensor = torch.zeros(2)   # [val_loss, val_acc]
+        if rank == 0:
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+            val_loss, val_acc = evaluate(model, val_loader, criterion, device)
+            val_tensor[0] = val_loss
+            val_tensor[1] = val_acc
+            log.info(f"Epoch {epoch}/{args.epochs} | "
+                     f"train_loss={train_loss:.4f} | "
+                     f"val_loss={val_loss:.4f} | val_acc={val_acc:.2f}%")
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
+        # Broadcast val metrics from rank 0 to all other ranks
+        dist.broadcast(val_tensor, src=0)
+        val_loss = val_tensor[0].item()
+        val_acc  = val_tensor[1].item()
+
+        # ALL ranks write one complete row with val_loss + val_acc
+        metrics.record_epoch(epoch, train_loss, val_loss, val_acc)
+
+        # Checkpoint every 5 epochs (rank 0 only)
+        if rank == 0 and epoch % 5 == 0:
+            os.makedirs("/results", exist_ok=True)
+            ckpt = f"/results/{args.run_id}_ep{epoch}.pt"
+            torch.save({"epoch": epoch, "model": model.state_dict(),
+                        "val_acc": val_acc}, ckpt)
+            log.info(f"Checkpoint: {ckpt}")
+
+        # Barrier 2: all ranks done writing, proceed to next epoch
+        dist.barrier()
 
     metrics.finalize()
     heartbeat.stop()
