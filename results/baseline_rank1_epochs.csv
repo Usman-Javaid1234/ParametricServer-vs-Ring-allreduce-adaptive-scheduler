@@ -1,0 +1,3 @@
+timestamp,epoch,train_loss,val_loss,val_acc,rank,world_size,arch
+1778126287.740068,1,1.593624,,,1,4,ring_ar
+1778126469.6941729,2,1.090227,,,1,4,ring_ar

@@ -1,13 +1,10 @@
-torch==2.2.2
-torchvision==0.17.2
-torchaudio==2.2.2
---extra-index-url https://download.pytorch.org/whl/cpu
+# PyTorch with CUDA 11.8 support
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.2.2+cu118
+torchvision==0.17.2+cu118
 
-# Monitoring
+# Monitoring & utils
 prometheus-client==0.20.0
-wandb==0.17.0
-
-# Data / utils
 numpy==1.26.4
 pandas==2.2.2
 matplotlib==3.9.0

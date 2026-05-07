@@ -110,6 +110,21 @@ class MetricsCollector:
         self._total_comm_ms    += comm_latency_ms
         self._total_throughput += throughput
 
+    def record_epoch_train(self, epoch: int, train_loss: float):
+        """Called by ALL ranks at end of each epoch — records train loss only."""
+        row = {
+            "timestamp":   time.time(),
+            "epoch":       epoch,
+            "train_loss":  round(train_loss, 6),
+            "val_loss":    "",   # only rank 0 fills these
+            "val_acc":     "",
+            "rank":        self.rank,
+            "world_size":  self.world_size,
+            "arch":        self.arch,
+        }
+        self._epoch_writer.writerow(row)
+        self._epoch_f.flush()
+
     def record_epoch(
         self,
         epoch: int,

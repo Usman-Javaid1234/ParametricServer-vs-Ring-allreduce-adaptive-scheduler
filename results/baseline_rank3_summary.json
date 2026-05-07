@@ -1,0 +1,11 @@
+{
+  "run_id": "baseline",
+  "rank": 3,
+  "arch": "ring_ar",
+  "world_size": 4,
+  "total_iterations": 1955,
+  "avg_comm_latency_ms": 822.833,
+  "avg_throughput_samp_s": 5.12,
+  "final_val_acc": 0.0,
+  "total_wall_time_s": 12541.68
+}
