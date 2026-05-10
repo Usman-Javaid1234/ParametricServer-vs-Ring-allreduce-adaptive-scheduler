@@ -1,0 +1,11 @@
+{
+  "run_id": "exp_a_ring_ar_n4",
+  "rank": 2,
+  "arch": "ring_ar",
+  "world_size": 4,
+  "total_iterations": 1173,
+  "avg_comm_latency_ms": 354.98,
+  "avg_throughput_samp_s": 82.75,
+  "final_val_acc": 71.91000366210938,
+  "total_wall_time_s": 488.05
+}

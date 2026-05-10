@@ -25,6 +25,7 @@ import torch.distributed as dist
 from torch.utils.data import DataLoader, DistributedSampler
 from metrics import MetricsCollector
 from orchestrator import HeartbeatSender
+from fault_injector import SlowdownInjector
 
 logging.basicConfig(
     level=logging.INFO,
@@ -138,7 +139,7 @@ class RingARBackend:
 # ---------------------------------------------------------------------------
 
 def train_epoch(model, loader, optimizer, criterion,
-                backend, metrics, device, epoch, rank, heartbeat):
+                backend, metrics, device, epoch, rank, heartbeat, injector):
     model.train()
     total_loss, total_samples = 0.0, 0
 
@@ -152,6 +153,9 @@ def train_epoch(model, loader, optimizer, criterion,
 
         comm_ms = backend.sync_gradients(model)
         optimizer.step()
+
+        # Straggler injection — sleeps STRAGGLER_DELAY_MS on the target worker
+        injector.maybe_delay(batch_idx + (epoch - 1) * len(loader))
 
         iter_ms        = (time.perf_counter() - iter_start) * 1000.0
         total_loss    += loss.item() * inputs.size(0)
@@ -169,10 +173,11 @@ def train_epoch(model, loader, optimizer, criterion,
         )
 
         if batch_idx % 50 == 0 and rank == 0:
+            straggler_tag = " [STRAGGLER]" if injector.is_straggler() else ""
             log.info(
                 f"Epoch {epoch} | Iter {batch_idx}/{len(loader)} | "
                 f"Loss: {loss.item():.4f} | Comm: {comm_ms:.1f}ms | "
-                f"Throughput: {throughput:.0f} samp/s"
+                f"Throughput: {throughput:.0f} samp/s{straggler_tag}"
             )
 
     return total_loss / max(total_samples, 1)
@@ -277,6 +282,9 @@ def main():
     metrics = MetricsCollector(run_id=args.run_id, rank=rank,
                                arch=args.backend, world_size=world_size)
 
+    # Fault injector — reads STRAGGLER_RANK / STRAGGLER_DELAY_MS from env
+    injector = SlowdownInjector(rank=rank)
+
     # Training loop — per-epoch validation on rank 0.
     # Barrier pair ensures rank 0 validates safely between epochs.
     # ONE row written per epoch per rank — no duplicates.
@@ -284,7 +292,7 @@ def main():
         sampler.set_epoch(epoch)
         train_loss = train_epoch(model, train_loader, optimizer, criterion,
                                  sync_backend, metrics, device, epoch,
-                                 rank, heartbeat)
+                                 rank, heartbeat, injector)
         scheduler.step()
 
         # Barrier 1: all workers done training this epoch
