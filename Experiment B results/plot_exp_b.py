@@ -40,19 +40,19 @@ CONFIGS = {
     "ring_ar": {
         "color": "#2563EB",
         "label": "Ring AllReduce",
-        "dir":   "ring_ar",
+        "dir":   "ring_ar_fixed",
         "prefix": "exp_b_ring_ar",
     },
     "ps_bsp": {
         "color": "#DC2626",
         "label": "PS-BSP (τ=0)",
-        "dir":   "ps",
+        "dir":   "ps_fixed",
         "prefix": "exp_b_ps_bsp",
     },
     "ps_ssp2": {
         "color": "#F59E0B",
         "label": "PS-SSP (τ=2)",
-        "dir":   "ps",
+        "dir":   "ps_fixed",
         "prefix": "exp_b_ps_ssp2",
     },
 }

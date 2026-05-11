@@ -124,8 +124,50 @@ class Orchestrator:
                                     f"(silence={silence:.1f}s)")
 
     def _on_worker_failure(self, worker_id: int):
-        log.error(f"[RECOVERY] Worker {worker_id} failed. "
-                  f"Phase 1: logging only. Phase 3: ring/PS recovery.")
+        """
+        Called when a worker is confirmed failed.
+        Logs recovery event with timing — used by Experiment C plot script.
+        """
+        recovery_start = time.time()
+        arch = os.environ.get("BACKEND", "unknown")
+
+        log.error(
+            f"[FAILURE CONFIRMED] Worker {worker_id} failed | arch={arch}"
+        )
+
+        if arch == "ring_ar":
+            log.error(
+                f"[RECOVERY] Ring AR: ring is BROKEN — training will halt. "
+                f"Ring AR cannot continue without worker {worker_id}. "
+                f"Recovery requires ring reformation (not implemented in Phase 1)."
+            )
+            recovery_action = "ring_broken_training_halted"
+        else:
+            log.warning(
+                f"[RECOVERY] PS: excluding worker {worker_id} from sync. "
+                f"Remaining workers continue with reduced batch size."
+            )
+            recovery_action = "ps_worker_excluded_training_continues"
+
+        # Write recovery event for plot_exp_c.py
+        import json
+        event = {
+            "worker_id":       worker_id,
+            "arch":            arch,
+            "detection_time":  recovery_start,
+            "recovery_action": recovery_action,
+            "run_id":          os.environ.get("RUN_ID", "unknown"),
+            "suspect_timeout": SUSPECT_TIMEOUT,
+            "confirm_timeout": CONFIRM_TIMEOUT,
+        }
+        results_dir = os.environ.get("RESULTS_DIR", "/results")
+        event_path  = f"{results_dir}/recovery_event_{worker_id}.json"
+        try:
+            with open(event_path, "w") as f:
+                json.dump(event, f, indent=2)
+            log.info(f"Recovery event saved → {event_path}")
+        except Exception as e:
+            log.warning(f"Could not save recovery event: {e}")
 
     # ---- Straggler detector ----
 

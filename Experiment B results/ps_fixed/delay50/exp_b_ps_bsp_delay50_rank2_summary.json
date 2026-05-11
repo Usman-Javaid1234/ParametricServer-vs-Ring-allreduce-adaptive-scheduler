@@ -1,0 +1,11 @@
+{
+  "run_id": "exp_b_ps_bsp_delay50",
+  "rank": 2,
+  "arch": "ps",
+  "world_size": 4,
+  "total_iterations": 1173,
+  "avg_comm_latency_ms": 555.054,
+  "avg_throughput_samp_s": 54.83,
+  "final_val_acc": 71.62999725341797,
+  "total_wall_time_s": 717.1
+}

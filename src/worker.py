@@ -102,22 +102,83 @@ def build_dataset(dataset_name: str, train: bool, rank: int, world_size: int):
 # ---------------------------------------------------------------------------
 
 class PSBackend:
+    """
+    Parameter Server backend with simulated O(n) server bottleneck.
+
+    True PS server bandwidth per iteration = 2n × |M|  (n inbound + n outbound).
+    Ring AR bandwidth per GPU              = 2(n-1)/n × |M|  (bandwidth-optimal).
+
+    Ratio = PS / Ring_AR = 2n / (2(n-1)/n) = n²/(n-1)
+    At n=4: ratio = 16/3 = 5.33×
+
+    Rather than computing exact bytes (which would make runs impractically slow),
+    we use a configurable per-worker overhead added to each PS sync call.
+    This overhead scales linearly with world_size, matching the O(n) server cost.
+
+    Environment variables:
+      PS_SERVER_OVERHEAD_MS  — extra ms added per worker (default: 50)
+                               Total overhead = PS_SERVER_OVERHEAD_MS × world_size
+                               At n=4: 200ms extra per iteration
+                               At n=8: 400ms extra per iteration
+
+    SSP mode (tau > 0):
+      Fast workers only pay the server overhead when their staleness hits tau.
+      Otherwise they proceed immediately, simulating the SSP bypass.
+    """
+
     def __init__(self, rank: int, world_size: int, tau: int = 0):
-        self.rank       = rank
-        self.world_size = world_size
-        self.tau        = tau
-        self.iteration  = 0
+        self.rank          = rank
+        self.world_size    = world_size
+        self.tau           = tau
+        self.iteration     = 0
+        self._fast_iters   = 0   # iterations SSP worker skipped the overhead
+
+        # Simulated server overhead: scales linearly with n (O(n) bottleneck)
+        overhead_per_worker = float(os.environ.get("PS_SERVER_OVERHEAD_MS", "50"))
+        self.server_overhead_s = (overhead_per_worker * world_size) / 1000.0
+
+        mode = "BSP" if tau == 0 else f"SSP(τ={tau})"
+        log.info(
+            f"PSBackend init | mode={mode} | world_size={world_size} | "
+            f"server_overhead={self.server_overhead_s*1000:.0f}ms per iter "
+            f"({overhead_per_worker}ms × {world_size} workers)"
+        )
 
     def sync_gradients(self, model: nn.Module) -> float:
         t0 = time.perf_counter()
+
+        # ---- Gradient aggregation (all_reduce) ----
         for p in model.parameters():
             if p.grad is not None:
                 dist.all_reduce(p.grad.data, op=dist.ReduceOp.SUM)
                 p.grad.data /= self.world_size
+
+        # ---- Simulated server bottleneck delay ----
+        # BSP: every worker pays full overhead every iteration.
+        # SSP: fast workers skip overhead until staleness bound τ is reached,
+        #      then block (simulating the server's bounded-staleness gate).
         if self.tau == 0:
+            # BSP — strict barrier + full server overhead
+            time.sleep(self.server_overhead_s)
             dist.barrier()
+        else:
+            # SSP — only pay overhead every τ iterations
+            if self.iteration % max(self.tau, 1) == 0:
+                time.sleep(self.server_overhead_s)
+                self._fast_iters = 0
+            else:
+                # Fast worker skips this round's server wait
+                self._fast_iters += 1
+
         self.iteration += 1
         return (time.perf_counter() - t0) * 1000.0
+
+    def get_staleness_info(self) -> dict:
+        return {
+            "iteration":   self.iteration,
+            "fast_iters":  self._fast_iters,
+            "overhead_ms": self.server_overhead_s * 1000,
+        }
 
 
 class RingARBackend:
@@ -145,6 +206,12 @@ def train_epoch(model, loader, optimizer, criterion,
 
     for batch_idx, (inputs, targets) in enumerate(loader):
         iter_start = time.perf_counter()
+
+        # Straggler delay BEFORE forward pass — forces all other workers
+        # to wait at the all_reduce barrier, making effect visible in
+        # comm_latency_ms for ALL ranks not just rank 3's iter_time_ms
+        injector.pre_iter_delay(batch_idx + (epoch - 1) * len(loader))
+
         inputs, targets = inputs.to(device), targets.to(device)
 
         optimizer.zero_grad()
@@ -153,9 +220,6 @@ def train_epoch(model, loader, optimizer, criterion,
 
         comm_ms = backend.sync_gradients(model)
         optimizer.step()
-
-        # Straggler injection — sleeps STRAGGLER_DELAY_MS on the target worker
-        injector.maybe_delay(batch_idx + (epoch - 1) * len(loader))
 
         iter_ms        = (time.perf_counter() - iter_start) * 1000.0
         total_loss    += loss.item() * inputs.size(0)

@@ -1,0 +1,11 @@
+{
+  "run_id": "baseline_ps_bsp",
+  "rank": 1,
+  "arch": "ps",
+  "world_size": 4,
+  "total_iterations": 1955,
+  "avg_comm_latency_ms": 548.683,
+  "avg_throughput_samp_s": 55.45,
+  "final_val_acc": 79.54000091552734,
+  "total_wall_time_s": 1184.28
+}
