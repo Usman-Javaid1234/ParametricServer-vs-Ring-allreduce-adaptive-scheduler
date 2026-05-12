@@ -1,0 +1,11 @@
+{
+  "run_id": "exp_w2_b2",
+  "rank": 1,
+  "arch": "compressed_ring_ar",
+  "world_size": 2,
+  "total_iterations": 3920,
+  "avg_comm_latency_ms": 130.195,
+  "avg_throughput_samp_s": 223.49,
+  "final_val_acc": 28.459999084472656,
+  "total_wall_time_s": 2549.85
+}

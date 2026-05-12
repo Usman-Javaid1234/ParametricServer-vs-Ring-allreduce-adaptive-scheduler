@@ -2,9 +2,6 @@
 --extra-index-url https://download.pytorch.org/whl/cu118
 torch==2.2.2+cu118
 torchvision==0.17.2+cu118
-
-# Monitoring & utils
-prometheus-client==0.20.0
 numpy==1.26.4
 pandas==2.2.2
 matplotlib==3.9.0

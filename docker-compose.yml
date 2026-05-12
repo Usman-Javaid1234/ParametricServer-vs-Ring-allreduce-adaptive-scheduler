@@ -1,4 +1,16 @@
-# docker-compose.yml — CS332 | Distributed SGD Project | Phase 1
+# docker-compose.yml — CS332 | Distributed SGD + QSGD Compression
+#
+# Usage:
+#   # 4 workers, 4-bit compression:
+#   WORLD_SIZE=4 NUM_BITS=4 RUN_ID=exp docker compose up
+#
+#   # 2 workers only:
+#   WORLD_SIZE=2 NUM_BITS=8 docker compose up orchestrator worker_0 worker_1
+#
+#   # Failure scenario:
+#   WORLD_SIZE=4 NUM_BITS=4 CRASH_RANK=1 CRASH_ITER=200 RUN_ID=failure docker compose up
+#
+# DIST_BACKEND defaults to nccl (GPU). Set DIST_BACKEND=gloo for CPU-only.
 
 x-worker-common: &worker-common
   build:
@@ -10,7 +22,7 @@ x-worker-common: &worker-common
       reservations:
         devices:
           - driver: nvidia
-            count: all
+            count: 1
             capabilities: [gpu]
   volumes:
     - ./src:/app/src
@@ -20,19 +32,20 @@ x-worker-common: &worker-common
     - MASTER_ADDR=worker_0
     - MASTER_PORT=29500
     - WORLD_SIZE=${WORLD_SIZE:-4}
-    - BACKEND=${BACKEND:-ring_ar}
-    - DIST_BACKEND=${DIST_BACKEND:-gloo}
-    - EPOCHS=${EPOCHS:-5}
+    - DIST_BACKEND=${DIST_BACKEND:-nccl}
+    - NUM_BITS=${NUM_BITS:-8}
+    - EPOCHS=${EPOCHS:-10}
     - BATCH_SIZE=${BATCH_SIZE:-128}
     - MODEL=${MODEL:-resnet18}
     - LR=${LR:-0.01}
-    - TAU=${TAU:-0}
-    - PS_SERVER_OVERHEAD_MS=${PS_SERVER_OVERHEAD_MS:-50}
+    - RUN_ID=${RUN_ID:-exp}
+    - RESULTS_DIR=/results
+    - ORCHESTRATOR_HOST=orchestrator
     - STRAGGLER_RANK=${STRAGGLER_RANK:-}
     - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
     - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-    - RUN_ID=${RUN_ID:-run}
-    - ORCHESTRATOR_HOST=orchestrator
+    - CRASH_RANK=${CRASH_RANK:-}
+    - CRASH_ITER=${CRASH_ITER:-200}
     - NVIDIA_VISIBLE_DEVICES=all
     - NVIDIA_DRIVER_CAPABILITIES=compute,utility
   networks:
@@ -48,12 +61,17 @@ services:
       context: .
       dockerfile: Dockerfile
     command: python /app/src/orchestrator.py --world-size ${WORLD_SIZE:-4} --port 29600
+    environment:
+      - RUN_ID=${RUN_ID:-exp}
+      - RESULTS_DIR=/results
     volumes:
       - ./src:/app/src
+      - ./results:/results
     networks:
       - cluster_net
     ports:
       - "29600:29600/udp"
+    mem_limit: 256m
 
   worker_0:
     <<: *worker-common
@@ -63,26 +81,22 @@ services:
       - MASTER_PORT=29500
       - WORLD_SIZE=${WORLD_SIZE:-4}
       - RANK=0
-      - BACKEND=${BACKEND:-ring_ar}
-      - DIST_BACKEND=${DIST_BACKEND:-gloo}
-      - EPOCHS=${EPOCHS:-5}
+      - DIST_BACKEND=${DIST_BACKEND:-nccl}
+      - NUM_BITS=${NUM_BITS:-8}
+      - EPOCHS=${EPOCHS:-10}
       - BATCH_SIZE=${BATCH_SIZE:-128}
       - MODEL=${MODEL:-resnet18}
       - LR=${LR:-0.01}
-      - TAU=${TAU:-0}
-      - PS_SERVER_OVERHEAD_MS=${PS_SERVER_OVERHEAD_MS:-50}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - PS_SERVER_OVERHEAD_MS=${PS_SERVER_OVERHEAD_MS:-50}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - RUN_ID=${RUN_ID:-run}
+      - RUN_ID=${RUN_ID:-exp}
+      - RESULTS_DIR=/results
       - ORCHESTRATOR_HOST=orchestrator
+      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
+      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
+      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
+      - CRASH_RANK=${CRASH_RANK:-}
+      - CRASH_ITER=${CRASH_ITER:-200}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     ports:
       - "29500:29500"
 
@@ -94,26 +108,22 @@ services:
       - MASTER_PORT=29500
       - WORLD_SIZE=${WORLD_SIZE:-4}
       - RANK=1
-      - BACKEND=${BACKEND:-ring_ar}
-      - DIST_BACKEND=${DIST_BACKEND:-gloo}
-      - EPOCHS=${EPOCHS:-5}
+      - DIST_BACKEND=${DIST_BACKEND:-nccl}
+      - NUM_BITS=${NUM_BITS:-8}
+      - EPOCHS=${EPOCHS:-10}
       - BATCH_SIZE=${BATCH_SIZE:-128}
       - MODEL=${MODEL:-resnet18}
       - LR=${LR:-0.01}
-      - TAU=${TAU:-0}
-      - PS_SERVER_OVERHEAD_MS=${PS_SERVER_OVERHEAD_MS:-50}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - PS_SERVER_OVERHEAD_MS=${PS_SERVER_OVERHEAD_MS:-50}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - RUN_ID=${RUN_ID:-run}
+      - RUN_ID=${RUN_ID:-exp}
+      - RESULTS_DIR=/results
       - ORCHESTRATOR_HOST=orchestrator
+      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
+      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
+      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
+      - CRASH_RANK=${CRASH_RANK:-}
+      - CRASH_ITER=${CRASH_ITER:-200}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
   worker_2:
     <<: *worker-common
@@ -123,26 +133,22 @@ services:
       - MASTER_PORT=29500
       - WORLD_SIZE=${WORLD_SIZE:-4}
       - RANK=2
-      - BACKEND=${BACKEND:-ring_ar}
-      - DIST_BACKEND=${DIST_BACKEND:-gloo}
-      - EPOCHS=${EPOCHS:-5}
+      - DIST_BACKEND=${DIST_BACKEND:-nccl}
+      - NUM_BITS=${NUM_BITS:-8}
+      - EPOCHS=${EPOCHS:-10}
       - BATCH_SIZE=${BATCH_SIZE:-128}
       - MODEL=${MODEL:-resnet18}
       - LR=${LR:-0.01}
-      - TAU=${TAU:-0}
-      - PS_SERVER_OVERHEAD_MS=${PS_SERVER_OVERHEAD_MS:-50}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - PS_SERVER_OVERHEAD_MS=${PS_SERVER_OVERHEAD_MS:-50}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - RUN_ID=${RUN_ID:-run}
+      - RUN_ID=${RUN_ID:-exp}
+      - RESULTS_DIR=/results
       - ORCHESTRATOR_HOST=orchestrator
+      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
+      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
+      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
+      - CRASH_RANK=${CRASH_RANK:-}
+      - CRASH_ITER=${CRASH_ITER:-200}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
   worker_3:
     <<: *worker-common
@@ -152,26 +158,126 @@ services:
       - MASTER_PORT=29500
       - WORLD_SIZE=${WORLD_SIZE:-4}
       - RANK=3
-      - BACKEND=${BACKEND:-ring_ar}
-      - DIST_BACKEND=${DIST_BACKEND:-gloo}
-      - EPOCHS=${EPOCHS:-5}
+      - DIST_BACKEND=${DIST_BACKEND:-nccl}
+      - NUM_BITS=${NUM_BITS:-8}
+      - EPOCHS=${EPOCHS:-10}
       - BATCH_SIZE=${BATCH_SIZE:-128}
       - MODEL=${MODEL:-resnet18}
       - LR=${LR:-0.01}
-      - TAU=${TAU:-0}
-      - PS_SERVER_OVERHEAD_MS=${PS_SERVER_OVERHEAD_MS:-50}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - PS_SERVER_OVERHEAD_MS=${PS_SERVER_OVERHEAD_MS:-50}
-      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
-      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
-      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
-      - RUN_ID=${RUN_ID:-run}
+      - RUN_ID=${RUN_ID:-exp}
+      - RESULTS_DIR=/results
       - ORCHESTRATOR_HOST=orchestrator
+      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
+      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
+      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
+      - CRASH_RANK=${CRASH_RANK:-}
+      - CRASH_ITER=${CRASH_ITER:-200}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+  worker_4:
+    <<: *worker-common
+    hostname: worker_4
+    environment:
+      - MASTER_ADDR=worker_0
+      - MASTER_PORT=29500
+      - WORLD_SIZE=${WORLD_SIZE:-4}
+      - RANK=4
+      - DIST_BACKEND=${DIST_BACKEND:-nccl}
+      - NUM_BITS=${NUM_BITS:-8}
+      - EPOCHS=${EPOCHS:-10}
+      - BATCH_SIZE=${BATCH_SIZE:-128}
+      - MODEL=${MODEL:-resnet18}
+      - LR=${LR:-0.01}
+      - RUN_ID=${RUN_ID:-exp}
+      - RESULTS_DIR=/results
+      - ORCHESTRATOR_HOST=orchestrator
+      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
+      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
+      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
+      - CRASH_RANK=${CRASH_RANK:-}
+      - CRASH_ITER=${CRASH_ITER:-200}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    profiles: ["8workers"]
+
+  worker_5:
+    <<: *worker-common
+    hostname: worker_5
+    environment:
+      - MASTER_ADDR=worker_0
+      - MASTER_PORT=29500
+      - WORLD_SIZE=${WORLD_SIZE:-4}
+      - RANK=5
+      - DIST_BACKEND=${DIST_BACKEND:-nccl}
+      - NUM_BITS=${NUM_BITS:-8}
+      - EPOCHS=${EPOCHS:-10}
+      - BATCH_SIZE=${BATCH_SIZE:-128}
+      - MODEL=${MODEL:-resnet18}
+      - LR=${LR:-0.01}
+      - RUN_ID=${RUN_ID:-exp}
+      - RESULTS_DIR=/results
+      - ORCHESTRATOR_HOST=orchestrator
+      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
+      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
+      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
+      - CRASH_RANK=${CRASH_RANK:-}
+      - CRASH_ITER=${CRASH_ITER:-200}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    profiles: ["8workers"]
+
+  worker_6:
+    <<: *worker-common
+    hostname: worker_6
+    environment:
+      - MASTER_ADDR=worker_0
+      - MASTER_PORT=29500
+      - WORLD_SIZE=${WORLD_SIZE:-4}
+      - RANK=6
+      - DIST_BACKEND=${DIST_BACKEND:-nccl}
+      - NUM_BITS=${NUM_BITS:-8}
+      - EPOCHS=${EPOCHS:-10}
+      - BATCH_SIZE=${BATCH_SIZE:-128}
+      - MODEL=${MODEL:-resnet18}
+      - LR=${LR:-0.01}
+      - RUN_ID=${RUN_ID:-exp}
+      - RESULTS_DIR=/results
+      - ORCHESTRATOR_HOST=orchestrator
+      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
+      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
+      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
+      - CRASH_RANK=${CRASH_RANK:-}
+      - CRASH_ITER=${CRASH_ITER:-200}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    profiles: ["8workers"]
+
+  worker_7:
+    <<: *worker-common
+    hostname: worker_7
+    environment:
+      - MASTER_ADDR=worker_0
+      - MASTER_PORT=29500
+      - WORLD_SIZE=${WORLD_SIZE:-4}
+      - RANK=7
+      - DIST_BACKEND=${DIST_BACKEND:-nccl}
+      - NUM_BITS=${NUM_BITS:-8}
+      - EPOCHS=${EPOCHS:-10}
+      - BATCH_SIZE=${BATCH_SIZE:-128}
+      - MODEL=${MODEL:-resnet18}
+      - LR=${LR:-0.01}
+      - RUN_ID=${RUN_ID:-exp}
+      - RESULTS_DIR=/results
+      - ORCHESTRATOR_HOST=orchestrator
+      - STRAGGLER_RANK=${STRAGGLER_RANK:-}
+      - STRAGGLER_DELAY_MS=${STRAGGLER_DELAY_MS:-0}
+      - STRAGGLER_START_ITER=${STRAGGLER_START_ITER:-10}
+      - CRASH_RANK=${CRASH_RANK:-}
+      - CRASH_ITER=${CRASH_ITER:-200}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    profiles: ["8workers"]
 
 networks:
   cluster_net:
